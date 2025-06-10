@@ -1,0 +1,159 @@
+// Firebase-enabled Flickerjack Deck Drawer (Admin + Face Card Reminders + Roll Outcomes)
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flickerjack Deck Drawer</title>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      text-align: center;
+      padding: 2rem;
+      background: linear-gradient(to bottom right, #f3e9ff, #d5f3ff);
+      color: #222;
+      font-size: 1.4rem;
+    }
+    button, select, input {
+      font-size: 1.4rem;
+      padding: 0.6rem 1.2rem;
+      margin: 0.3rem;
+    }
+    button {
+      background-color: #8a63d2;
+      color: white;
+      border: none;
+      border-radius: 0.4rem;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #704ab2;
+    }
+    .card-result, .roll-prompt, .result-message {
+      margin-top: 1rem;
+      font-size: 1.4rem;
+    }
+    .artwork {
+      margin-top: 1rem;
+      max-width: 300px;
+      height: auto;
+      border-radius: 10px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+    .admin-panel {
+      margin-top: 2rem;
+      padding: 1rem;
+      border: 1px solid #ccc;
+      background: #fff8;
+      border-radius: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Flickerjack Deck Drawer</h1>
+  <input id="playerIdInput" placeholder="Your player name" />
+  <button onclick="joinGame()">Join Game</button>
+  <button onclick="toggleAdmin()">Admin Panel</button>
+
+  <div id="gameUI" style="display:none;">
+    <button onclick="drawCard()">Draw a Card</button>
+    <div class="card-result" id="cardResult"></div>
+    <div class="roll-prompt" id="rollPrompt"></div>
+    <div class="roll-note" id="faceCardNote" style="color:#222; font-size: 1.4rem;"></div>
+    <img id="cardArt" class="artwork" src="" alt="" style="display:none;" />
+    <div id="resultButtons" style="display:none;">
+      <button onclick="applyResult(true)">✅ Success</button>
+      <button onclick="applyResult(false)">❌ Fail</button>
+    </div>
+    <div class="result-message" id="resultMessage"></div>
+  </div>
+
+  <div id="adminPanel" class="admin-panel" style="display:none;">
+    <h3>Admin Panel — Active Players</h3>
+    <div id="adminList"></div>
+  </div>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyCjz6VlhunjNNV32cbESAfebspJ-j44SJU",
+      authDomain: "flickerjack-94b26.firebaseapp.com",
+      projectId: "flickerjack-94b26",
+      storageBucket: "flickerjack-94b26.firebasestorage.app",
+      messagingSenderId: "714837339524",
+      appId: "1:714837339524:web:360575c8d31f504c2941d1",
+      measurementId: "G-C16L67JZG8"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    let playerId = "";
+    let currentCard = null;
+
+    const suits = ['Spring', 'Summer', 'Autumn', 'Winter'];
+    const numbers = ['2','3','4','5','6','7','8','9','10'];
+    const faceCards = ['Hound','Lady','Lord', 'Hag'];
+    const faceCardEffects = {
+      'Hound': '🐺 Nature sends a guide – Add +2 to your roll.',
+      'Lady': '🪞 She smiles – You may reroll your suit check once, but must use the new roll',
+      'Lord': '🗡️ A favor granted – Auto-succeed your suit roll and choose another player to reroll theirs.', 
+      'Hag': '💀 A bargain collected - Subtract 1d4 from your roll'
+    };
+
+    const suitEffects = {
+      'Spring': { prompt: '💮 DEX Save DC 12', success: 'Veiled in Illusion - No penalty for bluffing.', fail: 'Spring flees from your card, leaving a blank image - Lose 1 Influence' },
+      'Summer': { prompt: '🔥 CHA Save DC 13', success: 'Tactical Mind - Force another player to redraw.', fail: 'Thaumaturgy triggers and you cause a scene. Disadvantage on social checks for 1 hour.' },
+      'Autumn': { prompt: '🍂 INT Check DC 12', success: 'Illumination - Peek at another players card without them knowing.', fail: 'Your card starts to wither, cannot call bluffs this round.' },
+      'Winter': { prompt: '❄️ WIS Save DC 13', success: 'Clarity - Gain advantage on next Insight/Perception check.', fail: 'Whispers flood your mind. Next roll is at disadvantage.' }
+    };
+
+    function joinGame() {
+      playerId = document.getElementById('playerIdInput').value.trim();
+      if (!playerId) return alert("Enter your player name");
+      db.ref(`players/${playerId}`).set({ joined: true });
+      document.getElementById('gameUI').style.display = 'block';
+    }
+
+    function drawCard() {
+      const suit = suits[Math.floor(Math.random() * suits.length)];
+      const value = Math.random() < 0.25 ? faceCards[Math.floor(Math.random() * faceCards.length)] : numbers[Math.floor(Math.random() * numbers.length)];
+      currentCard = `${suit} ${value}`;
+      document.getElementById('cardResult').textContent = `You drew: ${currentCard}`;
+      document.getElementById('rollPrompt').textContent = suitEffects[suit].prompt;
+      document.getElementById('faceCardNote').textContent = faceCards.includes(value) ? `Face Card Effect: ${faceCardEffects[value]}` : '';
+      document.getElementById('resultButtons').style.display = 'block';
+      db.ref(`players/${playerId}`).update({ lastCard: currentCard, lastResult: null });
+    }
+
+    function applyResult(success) {
+      const suit = currentCard.split(' ')[0];
+      const resultText = suitEffects[suit][success ? 'success' : 'fail'];
+      document.getElementById('resultMessage').textContent = success ? `✅ Success! ${resultText}` : `❌ Failure. ${resultText}`;
+      db.ref(`players/${playerId}`).update({ lastResult: success ? 'Success' : 'Fail' });
+    }
+
+    function toggleAdmin() {
+      const adminPanel = document.getElementById('adminPanel');
+      adminPanel.style.display = adminPanel.style.display === 'none' ? 'block' : 'none';
+      updateAdminView();
+    }
+
+    function updateAdminView() {
+      db.ref('players').on('value', snapshot => {
+        const adminList = document.getElementById('adminList');
+        adminList.innerHTML = '';
+        snapshot.forEach(child => {
+          const id = child.key;
+          const data = child.val();
+          const el = document.createElement('div');
+          el.textContent = `${id} — Last Card: ${data.lastCard || 'None'} — Result: ${data.lastResult || 'None'}`;
+          adminList.appendChild(el);
+        });
+      });
+    }
+  </script>
+</body>
+</html>
